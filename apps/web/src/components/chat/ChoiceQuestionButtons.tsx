@@ -119,7 +119,12 @@ function ChoiceQuestionRow({
     ),
   );
   const toggle = (option: string) =>
-    choices.toggleChoice({ messageId, question: question.number, option });
+    choices.toggleChoice({
+      messageId,
+      question: question.number,
+      option,
+      questionText: question.text,
+    });
   const explainChosen = chosen === CHOICE_EXPLAIN_OPTION;
 
   return (

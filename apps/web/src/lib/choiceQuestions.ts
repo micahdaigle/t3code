@@ -258,11 +258,13 @@ export interface ChoiceChip {
   messageId: string;
   question: number;
   option: ChoiceOptionId;
+  /** The question as asked, quoted when the answer goes to an older message. */
+  questionText?: string;
 }
 
 const CHIP_PREFIX = "t3-choice://v1/";
 const CHIP_LINK =
-  /\[(\d{1,2})([A-HYN?])\]\(t3-choice:\/\/v1\/([^\s)/]{1,512})\/(\d{1,2})\/([^\s)/]{1,8})\)/g;
+  /\[(\d{1,2})([A-HYN?])\]\(t3-choice:\/\/v1\/([^\s)/?]{1,512})\/(\d{1,2})\/([^\s)/?]{1,8})(?:\?q=([^\s)]{1,2048}))?\)/g;
 
 /** What the chip reads as, in the composer and in the sent message. */
 export function choiceChipLabel(chip: Pick<ChoiceChip, "question" | "option">): string {
@@ -278,7 +280,8 @@ function encodePathPart(value: string): string {
 }
 
 export function serializeChoiceChip(chip: ChoiceChip): string {
-  return `[${choiceChipLabel(chip)}](${CHIP_PREFIX}${encodePathPart(chip.messageId)}/${chip.question}/${encodePathPart(chip.option)})`;
+  const query = chip.questionText ? `?q=${encodePathPart(chip.questionText)}` : "";
+  return `[${choiceChipLabel(chip)}](${CHIP_PREFIX}${encodePathPart(chip.messageId)}/${chip.question}/${encodePathPart(chip.option)}${query})`;
 }
 
 export function collectChoiceChips(
@@ -289,16 +292,23 @@ export function collectChoiceChips(
   for (const match of text.matchAll(CHIP_LINK)) {
     let messageId: string;
     let option: string;
+    let questionText: string | undefined;
     try {
       messageId = decodeURIComponent(match[3]!);
       option = decodeURIComponent(match[5]!);
+      questionText = match[6] === undefined ? undefined : decodeURIComponent(match[6]);
     } catch {
       continue;
     }
     // The label is what the user reads; ignore links whose target disagrees with it.
     if (match[1] !== match[4] || match[2] !== option) continue;
     chips.push({
-      chip: { messageId, question: Number(match[4]), option },
+      chip: {
+        messageId,
+        question: Number(match[4]),
+        option,
+        ...(questionText ? { questionText } : {}),
+      },
       source: match[0],
       start: match.index,
       end: match.index + match[0].length,
@@ -307,14 +317,23 @@ export function collectChoiceChips(
   return chips;
 }
 
-/** Chips leave the composer as their label, so the agent and every client read `1Y 2B`. */
-export function choiceChipsToPlainText(text: string): string {
+/**
+ * Chips leave the composer as their label, so the agent and every client read `1Y 2B`. Answers to
+ * an older message than `latestMessageId` also quote their question, since its number alone could
+ * mean the same number in the latest message: `1Y (re: "Merge now?")`.
+ */
+export function choiceChipsToPlainText(text: string, latestMessageId?: string): string {
   const chips = collectChoiceChips(text);
   if (chips.length === 0) return text;
   let result = "";
   let cursor = 0;
   for (const { chip, start, end } of chips) {
-    result += text.slice(cursor, start) + choiceChipLabel(chip);
+    const quoted =
+      latestMessageId !== undefined && chip.messageId !== latestMessageId && chip.questionText;
+    result +=
+      text.slice(cursor, start) +
+      choiceChipLabel(chip) +
+      (quoted ? ` (re: "${chip.questionText}")` : "");
     cursor = end;
   }
   return result + text.slice(cursor);

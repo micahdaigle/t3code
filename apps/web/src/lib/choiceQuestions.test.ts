@@ -224,6 +224,28 @@ describe("choice chips", () => {
     expect(collectChoiceChips(`x ${serializeChoiceChip(odd)} y`)[0]!.chip).toEqual(odd);
   });
 
+  it("round-trips the question text, including parentheses and quotes", () => {
+    const withText = { ...chip, questionText: 'Use "fast" mode (beta)?' };
+    expect(collectChoiceChips(serializeChoiceChip(withText))[0]!.chip).toEqual(withText);
+  });
+
+  it("quotes the question only for answers to an older message", () => {
+    const latest = serializeChoiceChip({
+      messageId: "new",
+      question: 1,
+      option: "Y",
+      questionText: "Ship it?",
+    });
+    const older = serializeChoiceChip({
+      messageId: "old",
+      question: 1,
+      option: "B",
+      questionText: "Pick a color:",
+    });
+    expect(choiceChipsToPlainText(`${latest} ${older}`, "new")).toBe('1Y 1B (re: "Pick a color:")');
+    expect(choiceChipsToPlainText(`${latest} ${older}`)).toBe("1Y 1B");
+  });
+
   it("ignores links whose label disagrees with the target", () => {
     expect(collectChoiceChips("[2A](t3-choice://v1/m/2/B)")).toEqual([]);
   });

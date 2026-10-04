@@ -8504,7 +8504,10 @@ export default function ChatView(props: ChatViewProps) {
       : promptRef.current;
     // Reply chips send as their plain label (`1Y 2B`) so the agent and every client read them;
     // a failed send restores the draft with its chips.
-    const outgoingPrompt = choiceChipsToPlainText(promptForSend);
+    const latestAssistantMessageId = timelineMessages.findLast(
+      (message) => message.role === "assistant",
+    )?.id;
+    const outgoingPrompt = choiceChipsToPlainText(promptForSend, latestAssistantMessageId);
     if (editingQueuedRun !== null) {
       // Edit mode repurposes the composer: sending saves the queued message
       // in place instead of dispatching a new turn.
@@ -8850,7 +8853,10 @@ export default function ChatView(props: ChatViewProps) {
         promptForSend,
       )
       .trim();
-    const messageTextForSend = choiceChipsToPlainText(messageDraftForSend);
+    const messageTextForSend = choiceChipsToPlainText(
+      messageDraftForSend,
+      latestAssistantMessageId,
+    );
     // Records bind attachments by the id each side knows: the local id for the optimistic
     // row, the upload id (or local id on the data-URL path) on the wire; the server
     // rebinds them to the persisted id.
