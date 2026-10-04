@@ -124,7 +124,7 @@ export function openCodeToolTurnItem(
           base.title,
         type: "file_search",
         ...(pattern === undefined ? {} : { pattern }),
-        ...(output === undefined || searchRoot === undefined
+        ...(!output?.trim() || searchRoot === undefined
           ? {}
           : {
               results: [
@@ -140,7 +140,7 @@ export function openCodeToolTurnItem(
         ...base,
         type: "web_search",
         ...(pattern === undefined ? {} : { patterns: [pattern] }),
-        ...(output === undefined
+        ...(!output?.trim()
           ? {}
           : {
               results: [
