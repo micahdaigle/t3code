@@ -17,7 +17,11 @@ import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 
-import { projectTurnItemForWire, projectDomainEventForWire } from "./WireProjection.ts";
+import {
+  projectTurnItemForWire,
+  projectTurnItemForDetail,
+  projectDomainEventForWire,
+} from "./WireProjection.ts";
 import { threadShellFromProjection } from "./ProjectionStore.ts";
 
 const decodeTurnItem = Schema.decodeUnknownSync(OrchestrationV2TurnItem);
@@ -259,6 +263,16 @@ describe("orchestration V2 wire projection", () => {
       expect(item.output).toBe(output);
     },
   );
+
+  it.each([
+    ["echo ok", "echo ok"],
+    ["a".repeat(262_143) + "😀", "a".repeat(262_143) + "\n… output truncated for transport"],
+  ])("bounds fetched command input without changing persistence, case %#", (input, expected) => {
+    const item = { ...base, type: "command_execution" as const, input, output: "ok" };
+    const projected = projectTurnItemForDetail(item);
+    expect(projected).toMatchObject({ input: expected, output: "ok" });
+    expect(item.input).toBe(input);
+  });
 
   it("keeps failure evidence without retaining command output", () => {
     const item = {
