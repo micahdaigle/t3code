@@ -182,7 +182,7 @@ import {
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { getTerminalFocusOwner } from "../../lib/terminalFocus";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
-import { planChoiceToggle, type ChoiceChip } from "~/lib/choiceQuestions";
+import { choiceChipsToPlainText, planChoiceToggle, type ChoiceChip } from "~/lib/choiceQuestions";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../../keybindings";
 import {
   type TerminalContextDraft,
@@ -6314,9 +6314,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             focusEditor,
           });
         }
-        if (isConnecting || isComposerApprovalState || pendingUserInputs.length > 0) return false;
+        if (
+          isConnecting ||
+          isComposerApprovalState ||
+          pendingUserInputs.length > 0 ||
+          projectSelectionRequired
+        ) {
+          return false;
+        }
         return applyPromptReplacement(plan.start, plan.end, plan.source, {
-          expectedText: promptRef.current.slice(plan.start, plan.end),
           focusEditorAfterReplace: focusEditor,
         });
       },
@@ -6804,7 +6810,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       ? "Choose an option above"
                       : activePendingProgress.customAnswer ||
                         "Type your own answer, or leave this blank to use the selected option"
-                    : prompt.trim() ||
+                    : choiceChipsToPlainText(prompt).trim() ||
                       (showProviderUnavailable
                         ? "Enable a provider in Settings"
                         : "Ask anything...")}

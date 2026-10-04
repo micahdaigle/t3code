@@ -4,8 +4,9 @@ import { createContext, Fragment, use, useMemo, type ReactNode } from "react";
 import { useComposerDraftStore, type ComposerThreadTarget } from "~/composerDraftStore";
 import {
   CHOICE_EXPLAIN_OPTION,
+  canSplitChoiceMarkdown,
   choiceChipLabel,
-  collectChoiceChips,
+  chosenChoiceOption,
   parseChoiceQuestions,
   type ChoiceChip as ChoiceChipValue,
   type ChoiceQuestion,
@@ -42,7 +43,9 @@ export function ChoiceChip({ chip }: { chip: ChoiceChipValue }) {
 
 /**
  * Renders an assistant message with a row of reply buttons under each question it asks. Messages
- * without questions, and messages still streaming, go through `renderMarkdown` untouched.
+ * without questions, and messages still streaming, go through `renderMarkdown` untouched. The
+ * first piece keeps one key in every state, so finishing a stream updates the rendered markdown
+ * instead of remounting it.
  */
 export function ChoiceQuestionMarkdown({
   text,
@@ -55,45 +58,66 @@ export function ChoiceQuestionMarkdown({
   isStreaming: boolean;
   renderMarkdown: (text: string) => ReactNode;
 }) {
-  const choices = use(ChoiceQuestionsContext);
-  const questions = useMemo(
-    () => (choices && !isStreaming ? parseChoiceQuestions(text) : []),
-    [choices, isStreaming, text],
-  );
-  if (!choices || questions.length === 0) return renderMarkdown(text);
+  const hasChoices = use(ChoiceQuestionsContext) !== null;
+  const layout = useMemo(() => {
+    const questions = hasChoices && !isStreaming ? parseChoiceQuestions(text) : [];
+    return { questions, inline: questions.length > 0 && canSplitChoiceMarkdown(text) };
+  }, [hasChoices, isStreaming, text]);
 
+  if (!layout.inline) {
+    return [
+      <Fragment key="chunk-0">{renderMarkdown(text)}</Fragment>,
+      ...layout.questions.map((question) => (
+        <ChoiceQuestionRow
+          key={`row-${question.number}`}
+          messageId={messageId}
+          question={question}
+          showNumber
+        />
+      )),
+    ];
+  }
+
+  const pieces: ReactNode[] = [];
   let cursor = 0;
-  return questions.map((question, index) => {
+  for (const question of layout.questions) {
     const chunk = text.slice(cursor, question.end);
-    cursor = question.end;
-    const rest = index === questions.length - 1 ? text.slice(cursor) : "";
-    return (
-      <Fragment key={question.number}>
-        {chunk.trim() ? renderMarkdown(chunk) : null}
-        <ChoiceQuestionRow messageId={messageId} question={question} />
-        {rest.trim() ? renderMarkdown(rest) : null}
-      </Fragment>
+    if (chunk.trim()) {
+      pieces.push(<Fragment key={`chunk-${cursor}`}>{renderMarkdown(chunk)}</Fragment>);
+    }
+    pieces.push(
+      <ChoiceQuestionRow
+        key={`row-${question.number}`}
+        messageId={messageId}
+        question={question}
+      />,
     );
-  });
+    cursor = question.end;
+  }
+  const rest = text.slice(cursor);
+  if (rest.trim()) pieces.push(<Fragment key={`chunk-${cursor}`}>{renderMarkdown(rest)}</Fragment>);
+  return pieces;
 }
 
 function ChoiceQuestionRow({
   messageId,
   question,
+  showNumber = false,
 }: {
   messageId: string;
   question: ChoiceQuestion;
+  /** Rows gathered under the message, away from their question, say which one they answer. */
+  showNumber?: boolean;
 }) {
   const choices = use(ChoiceQuestionsContext)!;
   // A primitive selection, so typing in the composer only re-renders rows whose pick changed.
-  const chosen = useComposerDraftStore((store) => {
-    const prompt = store.getComposerDraft(choices.draftTarget)?.prompt ?? "";
-    return (
-      collectChoiceChips(prompt).find(
-        ({ chip }) => chip.messageId === messageId && chip.question === question.number,
-      )?.chip.option ?? null
-    );
-  });
+  const chosen = useComposerDraftStore((store) =>
+    chosenChoiceOption(
+      store.getComposerDraft(choices.draftTarget)?.prompt ?? "",
+      messageId,
+      question.number,
+    ),
+  );
   const toggle = (option: string) =>
     choices.toggleChoice({ messageId, question: question.number, option });
   const explainChosen = chosen === CHOICE_EXPLAIN_OPTION;
@@ -104,6 +128,11 @@ function ChoiceQuestionRow({
       aria-label={`Reply to question ${question.number}`}
       className="my-2 flex flex-wrap items-center gap-1.5 select-none"
     >
+      {showNumber ? (
+        <span className="text-xs font-medium text-muted-foreground tabular-nums">
+          {question.number}.
+        </span>
+      ) : null}
       {question.options.map((option) => {
         const selected = chosen === option.id;
         return (

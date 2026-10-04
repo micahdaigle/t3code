@@ -8497,19 +8497,19 @@ export default function ChatView(props: ChatViewProps) {
         : sendContextPreviewAnnotations;
     // A direct "send annotation" writes the draft and sends in the same tick; the reference
     // must be in the text now, not after the next render.
-    // Reply chips send as their plain label (`1Y 2B`) so the agent and every client read them.
-    const promptForSend = choiceChipsToPlainText(
-      directAnnotation
-        ? ensureInlineContextReferences(promptRef.current, [
-            previewAnnotationContextReference(directAnnotation.annotation),
-          ])
-        : promptRef.current,
-    );
+    const promptForSend = directAnnotation
+      ? ensureInlineContextReferences(promptRef.current, [
+          previewAnnotationContextReference(directAnnotation.annotation),
+        ])
+      : promptRef.current;
+    // Reply chips send as their plain label (`1Y 2B`) so the agent and every client read them;
+    // a failed send restores the draft with its chips.
+    const outgoingPrompt = choiceChipsToPlainText(promptForSend);
     if (editingQueuedRun !== null) {
       // Edit mode repurposes the composer: sending saves the queued message
       // in place instead of dispatching a new turn.
       if (queuedEditSaveInFlightRef.current) return;
-      const editText = promptForSend.trim();
+      const editText = outgoingPrompt.trim();
       const newEditImages = [...composerImages];
       const newEditFiles = [...composerFiles];
       const newEditAttachments = [...newEditImages, ...newEditFiles];
@@ -8637,7 +8637,7 @@ export default function ChatView(props: ChatViewProps) {
       expiredTerminalContextCount,
       hasSendableContent,
     } = deriveComposerSendState({
-      prompt: promptForSend,
+      prompt: outgoingPrompt,
       imageCount: composerImages.length + composerFiles.length,
       terminalContexts: composerTerminalContexts,
       elementContextCount:
@@ -8710,7 +8710,7 @@ export default function ChatView(props: ChatViewProps) {
       composerFiles.length === 0
     ) {
       const followUp = resolvePlanFollowUpSubmission({
-        draftText: promptForSend,
+        draftText: outgoingPrompt,
         planMarkdown: activeProposedPlan.planMarkdown,
       });
       const outgoingFollowUpText = formatOutgoingPrompt({
@@ -8842,7 +8842,7 @@ export default function ChatView(props: ChatViewProps) {
     const composerReviewCommentsSnapshot: ReviewCommentContext[] = [...composerReviewComments];
     const composerThreadContextsSnapshot = [...composerThreadContexts];
     // Expired terminal excerpts are not sent; their chips leave the text with them.
-    const messageTextForSend = composerTerminalContexts
+    const messageDraftForSend = composerTerminalContexts
       .filter((context) => !composerTerminalContextsSnapshot.includes(context))
       .reduce(
         (text, context) =>
@@ -8850,6 +8850,7 @@ export default function ChatView(props: ChatViewProps) {
         promptForSend,
       )
       .trim();
+    const messageTextForSend = choiceChipsToPlainText(messageDraftForSend);
     // Records bind attachments by the id each side knows: the local id for the optimistic
     // row, the upload id (or local id on the data-URL path) on the wire; the server
     // rebinds them to the persisted id.
@@ -9242,7 +9243,7 @@ export default function ChatView(props: ChatViewProps) {
         const restoreFailedDraft = () => {
           setMultipleModelSelections(failedSelections);
           if (clearedDraft) {
-            setComposerDraftPrompt(composerDraftTarget, messageTextForSend);
+            setComposerDraftPrompt(composerDraftTarget, messageDraftForSend);
             addComposerDraftImages(
               composerDraftTarget,
               composerImagesSnapshot.map(cloneComposerImageForRetry),
@@ -9256,13 +9257,13 @@ export default function ChatView(props: ChatViewProps) {
             setComposerDraftReviewComments(composerDraftTarget, composerReviewCommentsSnapshot);
             setComposerDraftThreadContexts(composerDraftTarget, composerThreadContextsSnapshot);
             if (composerRef.current && currentRouteThreadKeyRef.current === routeThreadKey) {
-              promptRef.current = messageTextForSend;
+              promptRef.current = messageDraftForSend;
               composerRef.current.resetCursorState({
                 cursor: collapseExpandedComposerCursor(
-                  messageTextForSend,
-                  messageTextForSend.length,
+                  messageDraftForSend,
+                  messageDraftForSend.length,
                 ),
-                prompt: messageTextForSend,
+                prompt: messageDraftForSend,
                 detectTrigger: true,
               });
             }
@@ -9650,12 +9651,12 @@ export default function ChatView(props: ChatViewProps) {
           const next = existing.filter((message) => message.id !== messageIdForSend);
           return next.length === existing.length ? existing : next;
         });
-        promptRef.current = messageTextForSend;
+        promptRef.current = messageDraftForSend;
         const retryComposerImages = composerImagesSnapshot.map(cloneComposerImageForRetry);
         composerImagesRef.current = retryComposerImages;
         composerFilesRef.current = composerFilesSnapshot;
         composerTerminalContextsRef.current = composerTerminalContextsSnapshot;
-        setComposerDraftPrompt(composerDraftTarget, messageTextForSend);
+        setComposerDraftPrompt(composerDraftTarget, messageDraftForSend);
         addComposerDraftImages(composerDraftTarget, retryComposerImages);
         addComposerDraftFiles(composerDraftTarget, composerFilesSnapshot);
         setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot);
@@ -9663,8 +9664,8 @@ export default function ChatView(props: ChatViewProps) {
         setComposerDraftReviewComments(composerDraftTarget, composerReviewCommentsSnapshot);
         setComposerDraftThreadContexts(composerDraftTarget, composerThreadContextsSnapshot);
         composerRef.current?.resetCursorState({
-          cursor: collapseExpandedComposerCursor(messageTextForSend, messageTextForSend.length),
-          prompt: messageTextForSend,
+          cursor: collapseExpandedComposerCursor(messageDraftForSend, messageDraftForSend.length),
+          prompt: messageDraftForSend,
           detectTrigger: true,
         });
       }

@@ -43,13 +43,16 @@ export const CHOICE_EXPLAIN_OPTION = "?";
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 const HEADING = /^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
-const QUESTIONS_HEADING = /^(?:\*\*)?questions?\b/i;
-const BOLD_QUESTION = /^ {0,3}(?:[-*+]\s+)?\*\*(\d{1,2})[.)]\s+(.+?)\*\*(.*)$/;
-const BOLD_NUMBER = /^ {0,3}(?:[-*+]\s+)?\*\*(\d{1,2})[.)]\*\*\s+(.+)$/;
-const LIST_QUESTION = /^ {0,3}(\d{1,2})[.)]\s+(.+)$/;
+const QUESTIONS_HEADING = /^(?:open\s+)?questions?(?:\s+for\s+you)?\s*:?$/i;
+const BOLD_QUESTION = /^( {0,3})(?:[-*+]\s+)?\*\*(\d{1,2})[.)]\s+(.+?)\*\*(.*)$/;
+const BOLD_NUMBER = /^( {0,3})(?:[-*+]\s+)?\*\*(\d{1,2})[.)]\*\*\s+(.+)$/;
+const LIST_QUESTION = /^( {0,3})(\d{1,2})[.)]\s+(.+)$/;
 const OPTION = /^\s*(?:[-*+]\s+)?(\*\*)?([A-H])[.)]\s+(.+)$/;
-const LIST_ITEM = /^\s*(?:[-*+]|\d{1,2}[.)])\s+/;
-const YES_NO = /\(\s*(?:\*\*)?\s*([YN])\s*★\s*(?:\*\*)?\s*\)|\(\s*Y\s*\/\s*N\s*\)/i;
+const YES_NO = String.raw`\(\s*(?:([YN])\s*★|Y\s*\/\s*N)\s*\)`;
+/** A marker right after the bold question, optionally bold itself: `**1. Merge?** **(Y★)**`. */
+const YES_NO_AFTER = new RegExp(String.raw`^\s*(?:\*\*)?\s*${YES_NO}`, "i");
+/** A marker ending the question text: `**1. Merge? (Y★)**` or `1. Merge? (Y/N)`. */
+const YES_NO_END = new RegExp(String.raw`\s*${YES_NO}\s*$`, "i");
 const RECOMMENDED = /★|\(recommended\)/i;
 const MAX_LABEL_LENGTH = 48;
 
@@ -94,33 +97,48 @@ function optionLabel(bold: boolean, body: string): string {
   );
 }
 
-function parseQuestionLine(
-  text: string,
-  inQuestionsSection: boolean,
-): { number: number; text: string; marker: string } | null {
-  const bold = BOLD_QUESTION.exec(text);
-  if (bold) return { number: Number(bold[1]), text: bold[2]!, marker: bold[3] ?? "" };
-  const boldNumber = BOLD_NUMBER.exec(text);
-  if (boldNumber) return { number: Number(boldNumber[1]), text: boldNumber[2]!, marker: "" };
-  if (!inQuestionsSection) return null;
-  const listed = LIST_QUESTION.exec(text);
-  if (!listed) return null;
-  return { number: Number(listed[1]), text: listed[2]!, marker: "" };
+interface QuestionLine {
+  indent: number;
+  number: number;
+  text: string;
+  /** Recommended answer from a yes/no marker; `null` for a marker without a pick. */
+  yesNo: "Y" | "N" | null | undefined;
 }
 
-function yesNoOptions(source: string): ChoiceOption[] | null {
-  const match = YES_NO.exec(source);
+function yesNoFrom(match: RegExpExecArray | null): QuestionLine["yesNo"] {
+  if (!match) return undefined;
+  const pick = match[1]?.toUpperCase();
+  return pick === "Y" || pick === "N" ? pick : null;
+}
+
+function parseQuestionLine(text: string, inQuestionsSection: boolean): QuestionLine | null {
+  const bold = BOLD_QUESTION.exec(text) ?? BOLD_NUMBER.exec(text);
+  const listed = bold ? null : inQuestionsSection ? LIST_QUESTION.exec(text) : null;
+  const match = bold ?? listed;
   if (!match) return null;
-  const recommended = match[1]?.toUpperCase();
-  return [
-    { id: "Y", label: "Yes", recommended: recommended === "Y" },
-    { id: "N", label: "No", recommended: recommended === "N" },
-  ];
+  let questionText = match[3]!;
+  const inside = YES_NO_END.exec(questionText);
+  if (inside) questionText = questionText.slice(0, inside.index);
+  // Only BOLD_QUESTION captures the rest of the line after the bold text.
+  const trailing = bold?.[4] === undefined ? null : YES_NO_AFTER.exec(bold[4]);
+  return {
+    indent: match[1]!.length,
+    number: Number(match[2]),
+    text: stripMarkdown(questionText),
+    yesNo: inside ? yesNoFrom(inside) : yesNoFrom(trailing),
+  };
+}
+
+function isClosingFence(text: string, opener: string): boolean {
+  const match = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(text);
+  return match !== null && match[1]![0] === opener[0] && match[1]!.length >= opener.length;
 }
 
 /** Finds the reply-able questions in an assistant message, in order. */
 export function parseChoiceQuestions(markdown: string): ChoiceQuestion[] {
-  if (!markdown.includes("**") && !/^ {0,3}#{1,6}\s+questions?\b/im.test(markdown)) return [];
+  if (!markdown.includes("**") && !/^ {0,3}#{1,6}\s+(?:open\s+)?questions?\b/im.test(markdown)) {
+    return [];
+  }
   const lines = splitLines(markdown);
   const questions: ChoiceQuestion[] = [];
   const seenNumbers = new Set<number>();
@@ -130,12 +148,12 @@ export function parseChoiceQuestions(markdown: string): ChoiceQuestion[] {
   let index = 0;
   while (index < lines.length) {
     const line = lines[index]!;
-    const fenceMatch = FENCE.exec(line.text);
     if (fence !== null) {
-      if (fenceMatch && fenceMatch[1]!.startsWith(fence)) fence = null;
+      if (isClosingFence(line.text, fence)) fence = null;
       index += 1;
       continue;
     }
+    const fenceMatch = FENCE.exec(line.text);
     if (fenceMatch) {
       fence = fenceMatch[1]!;
       index += 1;
@@ -144,20 +162,22 @@ export function parseChoiceQuestions(markdown: string): ChoiceQuestion[] {
     const heading = HEADING.exec(line.text);
     if (heading) {
       const level = heading[1]!.length;
-      if (QUESTIONS_HEADING.test(heading[2]!)) questionsLevel = level;
+      if (QUESTIONS_HEADING.test(stripMarkdown(heading[2]!))) questionsLevel = level;
       else if (questionsLevel !== null && level <= questionsLevel) questionsLevel = null;
       index += 1;
       continue;
     }
 
-    const question = parseQuestionLine(line.text, questionsLevel !== null);
+    const inSection = questionsLevel !== null;
+    const question = parseQuestionLine(line.text, inSection);
     if (!question) {
       index += 1;
       continue;
     }
 
-    // The question owns the lines below it up to a blank line followed by prose, the next
-    // question, a heading, or a fence. List items and paragraph continuations stay attached.
+    // The question owns the lines below it: paragraph continuations, its list items, deeper
+    // indented lines (nested lists), and option lines even after a blank line. It ends at prose
+    // after a blank line, a question at the same or a shallower indent, a heading, or a fence.
     let end = line.end;
     let previousBlank = false;
     const body: string[] = [];
@@ -168,14 +188,11 @@ export function parseChoiceQuestions(markdown: string): ChoiceQuestion[] {
         previousBlank = true;
         continue;
       }
-      if (
-        FENCE.test(candidate) ||
-        HEADING.test(candidate) ||
-        parseQuestionLine(candidate, questionsLevel !== null)
-      ) {
-        break;
-      }
-      const attached = LIST_ITEM.test(candidate) || /^\s{2,}\S/.test(candidate) || !previousBlank;
+      if (FENCE.test(candidate) || HEADING.test(candidate)) break;
+      const nested = parseQuestionLine(candidate, inSection);
+      if (nested && nested.indent <= question.indent) break;
+      const indented = /^\s{2,}\S/.test(candidate);
+      const attached = !previousBlank || indented || OPTION.test(candidate);
       if (!attached) break;
       body.push(candidate);
       end = lines[next]!.end;
@@ -195,22 +212,44 @@ export function parseChoiceQuestions(markdown: string): ChoiceQuestion[] {
         recommended: RECOMMENDED.test(bodyLine),
       });
     }
-    const yesNo = options.length < 2 ? yesNoOptions(`${question.text} ${question.marker}`) : null;
-    const kind = options.length >= 2 ? "options" : yesNo ? "yes-no" : "open";
-    const accepted = kind !== "open" || questionsLevel !== null;
+    const kind = options.length >= 2 ? "options" : question.yesNo !== undefined ? "yes-no" : "open";
+    // Outside a Questions section, numbered bold lines are often plan steps or summaries; only
+    // ones that read as a question or a prompt for a pick become buttons.
+    const accepted = inSection || (kind !== "open" && /[?:]$/.test(question.text));
     if (accepted && !seenNumbers.has(question.number)) {
       seenNumbers.add(question.number);
       questions.push({
         number: question.number,
-        text: stripMarkdown(question.text.replace(YES_NO, "")),
+        text: question.text,
         kind,
-        options: kind === "options" ? options : (yesNo ?? []),
+        options:
+          kind === "options"
+            ? options
+            : kind === "yes-no"
+              ? [
+                  { id: "Y", label: "Yes", recommended: question.yesNo === "Y" },
+                  { id: "N", label: "No", recommended: question.yesNo === "N" },
+                ]
+              : [],
         end,
       });
     }
     index = next;
   }
   return questions;
+}
+
+/**
+ * Buttons sit under each question by rendering the message in pieces split at question ends.
+ * Markdown that reaches across pieces (reference links, footnotes, raw HTML blocks) would break,
+ * so such messages keep one piece and put every question's buttons after it.
+ */
+export function canSplitChoiceMarkdown(markdown: string): boolean {
+  return (
+    !/^ {0,3}\[[^\]\n]+\]:\s*\S/m.test(markdown) &&
+    !/\[\^[^\]\n]+\]/.test(markdown) &&
+    !/^ {0,3}<\/?[A-Za-z][\w-]*(?:[\s/>]|$)/m.test(markdown)
+  );
 }
 
 // ── Composer chips ────────────────────────────────────────────────────────
@@ -230,8 +269,16 @@ export function choiceChipLabel(chip: Pick<ChoiceChip, "question" | "option">): 
   return `${chip.question}${chip.option}`;
 }
 
+/** Percent-encodes parentheses too, which would otherwise end the markdown link early. */
+function encodePathPart(value: string): string {
+  return encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
 export function serializeChoiceChip(chip: ChoiceChip): string {
-  return `[${choiceChipLabel(chip)}](${CHIP_PREFIX}${encodeURIComponent(chip.messageId)}/${chip.question}/${encodeURIComponent(chip.option)})`;
+  return `[${choiceChipLabel(chip)}](${CHIP_PREFIX}${encodePathPart(chip.messageId)}/${chip.question}/${encodePathPart(chip.option)})`;
 }
 
 export function collectChoiceChips(
@@ -273,13 +320,17 @@ export function choiceChipsToPlainText(text: string): string {
   return result + text.slice(cursor);
 }
 
-/** The option currently chosen for each question of one message, keyed by question number. */
-export function chosenChoiceOptions(text: string, messageId: string): Map<number, ChoiceOptionId> {
-  const chosen = new Map<number, ChoiceOptionId>();
-  for (const { chip } of collectChoiceChips(text)) {
-    if (chip.messageId === messageId) chosen.set(chip.question, chip.option);
-  }
-  return chosen;
+/** The option currently chosen for one question of one message, or `null`. */
+export function chosenChoiceOption(
+  text: string,
+  messageId: string,
+  question: number,
+): ChoiceOptionId | null {
+  return (
+    collectChoiceChips(text).find(
+      ({ chip }) => chip.messageId === messageId && chip.question === question,
+    )?.chip.option ?? null
+  );
 }
 
 /**

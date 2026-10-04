@@ -2,7 +2,8 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   choiceChipsToPlainText,
-  chosenChoiceOptions,
+  canSplitChoiceMarkdown,
+  chosenChoiceOption,
   collectChoiceChips,
   parseChoiceQuestions,
   planChoiceToggle,
@@ -130,8 +131,75 @@ describe("parseChoiceQuestions", () => {
     expect(parseChoiceQuestions(markdown).map((question) => question.text)).toEqual(["First?"]);
   });
 
+  it("keeps nested numbered sub-items inside their question", () => {
+    const markdown = `## Questions
+
+1. Which approach?
+   1. Rewrite it
+   2. Patch it
+2. Ship today? (Y/N)`;
+    const questions = parseChoiceQuestions(markdown);
+    expect(questions.map((question) => [question.number, question.kind])).toEqual([
+      [1, "open"],
+      [2, "yes-no"],
+    ]);
+    expect(markdown.slice(0, questions[0]!.end).endsWith("2. Patch it")).toBe(true);
+  });
+
+  it("only reads a yes/no marker right after the question", () => {
+    expect(
+      parseChoiceQuestions("**1. Updated the parser.** It now handles (Y/N) markers."),
+    ).toEqual([]);
+  });
+
+  it("only treats a heading that is just 'Questions' as a questions section", () => {
+    expect(parseChoiceQuestions("## Questions you asked\n\n**1. Why is it slow?**")).toEqual([]);
+    expect(parseChoiceQuestions("## Open questions:\n\n**1. Why is it slow?**")).toHaveLength(1);
+  });
+
+  it("ignores lettered sub-bullets under plan steps outside a Questions section", () => {
+    const markdown = `**1. Refactor the store.**
+- A. Split the reducer.
+- B. Add tests.`;
+    expect(parseChoiceQuestions(markdown)).toEqual([]);
+  });
+
+  it("does not attach an unrelated list that follows a blank line", () => {
+    const markdown = `**1. Merge now?** (Y/N)
+
+- Also, I renamed two files.`;
+    const [question] = parseChoiceQuestions(markdown);
+    expect(markdown.slice(0, question!.end)).toBe("**1. Merge now?** (Y/N)");
+  });
+
+  it("keeps options attached across blank lines", () => {
+    const markdown = `**2. Pick one:**
+
+- **A. Red.**
+
+- **B. Blue.** (★)`;
+    expect(parseChoiceQuestions(markdown)[0]!.options.map((option) => option.id)).toEqual([
+      "A",
+      "B",
+    ]);
+  });
+
+  it("does not close a fence on a line with an info string", () => {
+    const markdown = "```\nfoo\n```ts\n**1. Bad?** (Y/N)\n```\n";
+    expect(parseChoiceQuestions(markdown)).toEqual([]);
+  });
+
   it("returns nothing for ordinary prose", () => {
     expect(parseChoiceQuestions("Just a normal **bold** answer.\n\n1. one\n2. two")).toEqual([]);
+  });
+});
+
+describe("canSplitChoiceMarkdown", () => {
+  it("refuses markdown that reaches across pieces", () => {
+    expect(canSplitChoiceMarkdown("**1. Merge?** (Y/N)")).toBe(true);
+    expect(canSplitChoiceMarkdown("See [docs][d].\n\n[d]: https://example.com")).toBe(false);
+    expect(canSplitChoiceMarkdown("A claim.[^1]\n\n[^1]: Source.")).toBe(false);
+    expect(canSplitChoiceMarkdown("<details>\n\n**1. Merge?** (Y/N)\n\n</details>")).toBe(false);
   });
 });
 
@@ -151,6 +219,11 @@ describe("choice chips", () => {
     expect(choiceChipsToPlainText(serializeChoiceChip(explain))).toBe("2?");
   });
 
+  it("encodes parentheses in message ids so the link stays intact", () => {
+    const odd = { ...chip, messageId: "a)b(c" };
+    expect(collectChoiceChips(`x ${serializeChoiceChip(odd)} y`)[0]!.chip).toEqual(odd);
+  });
+
   it("ignores links whose label disagrees with the target", () => {
     expect(collectChoiceChips("[2A](t3-choice://v1/m/2/B)")).toEqual([]);
   });
@@ -160,9 +233,10 @@ describe("choice chips", () => {
     expect(choiceChipsToPlainText(text)).toBe("1Y 2B but use teal");
   });
 
-  it("reports the chosen options for one message only", () => {
+  it("reports the chosen option for one message only", () => {
     const text = `${serializeChoiceChip({ messageId: "m", question: 1, option: "Y" })} ${serializeChoiceChip({ messageId: "other", question: 2, option: "B" })}`;
-    expect([...chosenChoiceOptions(text, "m")]).toEqual([[1, "Y"]]);
+    expect(chosenChoiceOption(text, "m", 1)).toBe("Y");
+    expect(chosenChoiceOption(text, "m", 2)).toBeNull();
   });
 
   it("inserts, swaps in place, and removes on a second tap", () => {

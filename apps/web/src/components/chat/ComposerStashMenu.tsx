@@ -3,6 +3,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 
 import { formatRelativeTimeLabel } from "../../timestampFormat";
+import { choiceChipsToPlainText } from "~/lib/choiceQuestions";
 import { cn } from "~/lib/utils";
 import { type PromptStashEntry } from "../../promptStashStore";
 import { ComposerBanner } from "./ComposerBanner";
@@ -15,7 +16,9 @@ function missingImageCount(entry: PromptStashEntry): number {
 }
 
 function stashEntrySnippet(entry: PromptStashEntry): string {
-  const trimmed = assistantCitationsToPlainText(entry.prompt).trim().replace(/\s+/g, " ");
+  const trimmed = assistantCitationsToPlainText(choiceChipsToPlainText(entry.prompt))
+    .trim()
+    .replace(/\s+/g, " ");
   if (trimmed.length > 0) {
     return trimmed.length > SNIPPET_MAX_CHARS ? `${trimmed.slice(0, SNIPPET_MAX_CHARS)}…` : trimmed;
   }
