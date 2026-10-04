@@ -120,6 +120,9 @@ function atomJsonForSegment(
       },
     };
   }
+  if (segment.type === "choice") {
+    return { type: "composer-choice", attrs: { chip: segment.chip, source: segment.source } };
+  }
   if (segment.type === "citation") {
     return {
       type: "composer-citation",
@@ -304,6 +307,7 @@ function readAtomSource(node: ProseMirrorNode): string {
     case "composer-mention":
     case "composer-citation":
     case "composer-context-reference":
+    case "composer-choice":
       return typeof attrs.source === "string" ? attrs.source : "";
     case "composer-skill": {
       const name = typeof attrs.skillName === "string" ? attrs.skillName : "";

@@ -182,6 +182,7 @@ import {
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { getTerminalFocusOwner } from "../../lib/terminalFocus";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
+import { planChoiceToggle, type ChoiceChip } from "~/lib/choiceQuestions";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../../keybindings";
 import {
   type TerminalContextDraft,
@@ -1445,6 +1446,8 @@ export interface ChatComposerHandle {
     citation: AssistantCitation,
     sourceAnchor: AssistantCitationSourceAnchor,
   ) => boolean;
+  /** Picks, swaps, or (on a second tap) removes a reply chip for an assistant question. */
+  toggleChoice: (chip: ChoiceChip) => boolean;
   openModelPicker: () => void;
   toggleModelPicker: () => void;
   openControl: (command: KeybindingCommand) => void;
@@ -6008,6 +6011,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ensureLeadingBoundary?: boolean;
         citationCommentAnchor?: AssistantCitationSourceAnchor;
         clipboardData?: DataTransfer;
+        focusEditor?: boolean;
       },
     ): boolean => {
       if (
@@ -6042,7 +6046,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               },
               focusEditorAfterReplace: false,
             }
-          : undefined,
+          : options?.focusEditor === false
+            ? { focusEditorAfterReplace: false }
+            : undefined,
       );
     },
     [
@@ -6298,6 +6304,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           "cursor",
           { ensureLeadingBoundary: true, citationCommentAnchor: sourceAnchor },
         ),
+      toggleChoice: (chip) => {
+        // Touch devices keep the keyboard closed so several questions can be answered in a row.
+        const focusEditor = !window.matchMedia("(pointer: coarse)").matches;
+        const plan = planChoiceToggle(promptRef.current, chip);
+        if (plan.kind === "insert") {
+          return insertComposerText(`${plan.source} `, "cursor", {
+            ensureLeadingBoundary: true,
+            focusEditor,
+          });
+        }
+        if (isConnecting || isComposerApprovalState || pendingUserInputs.length > 0) return false;
+        return applyPromptReplacement(plan.start, plan.end, plan.source, {
+          expectedText: promptRef.current.slice(plan.start, plan.end),
+          focusEditorAfterReplace: focusEditor,
+        });
+      },
       openModelPicker,
       toggleModelPicker: () => {
         if (isComposerModelPickerOpen) {

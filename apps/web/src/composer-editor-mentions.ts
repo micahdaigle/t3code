@@ -5,6 +5,7 @@ import {
   collectComposerInlineTokens,
   type ComposerInlineToken,
 } from "@t3tools/shared/composerInlineTokens";
+import { collectChoiceChips, type ChoiceChip } from "~/lib/choiceQuestions";
 
 export type ComposerPromptSegment =
   | {
@@ -31,6 +32,11 @@ export type ComposerPromptSegment =
       kind: string;
       contextId: string;
       label: string;
+      source: string;
+    }
+  | {
+      type: "choice";
+      chip: ChoiceChip;
       source: string;
     };
 
@@ -79,12 +85,14 @@ export function collectComposerPromptInlineTokens(text: string) {
   const tokens = collectComposerInlineTokens(text);
   const citations = collectAssistantCitations(text);
   const references = collectComposerContextReferences(text);
-  if (citations.length === 0 && references.length === 0) return tokens;
+  const choices = collectChoiceChips(text);
+  if (citations.length === 0 && references.length === 0 && choices.length === 0) return tokens;
 
   // An unfinished @ mention can otherwise consume the start of a link label.
   const links = [
     ...citations.map((match) => ({ ...match, type: "citation" as const })),
     ...references.map((match) => ({ ...match, type: "context-reference" as const })),
+    ...choices.map((match) => ({ ...match, type: "choice" as const })),
   ];
   return [
     ...tokens.filter(
@@ -113,6 +121,8 @@ function splitPromptTextIntoComposerSegments(text: string): ComposerPromptSegmen
 
     if (match.type === "citation") {
       segments.push({ type: "citation", citation: match.citation, source: match.source });
+    } else if (match.type === "choice") {
+      segments.push({ type: "choice", chip: match.chip, source: match.source });
     } else if (match.type === "context-reference") {
       segments.push({
         type: "context-reference",

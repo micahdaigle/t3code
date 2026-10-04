@@ -63,11 +63,13 @@ import {
   markAsClipboardEdit,
 } from "~/composer-undo-grouping";
 import { collectInlineContextIds } from "~/lib/composerContextReferences";
+import type { ChoiceChip as ChoiceChipValue } from "~/lib/choiceQuestions";
 import { cn, isMacPlatform } from "~/lib/utils";
 import { basenameOfPath } from "~/pierre-icons";
 import { FileTagChipContent } from "./chat/FileTagChip";
 import { SkillChipIcon } from "./chat/SkillInlineText";
 import { AssistantCitationChip } from "./chat/AssistantCitationChip";
+import { ChoiceChip } from "./chat/ChoiceQuestionButtons";
 import { getTimelinePageScrollKey } from "./chat/pageScrollController";
 import { ContextChipPopover } from "./contextChipParts";
 import { Button } from "./ui/button";
@@ -475,6 +477,37 @@ function ComposerContextReferenceNodeView({ node }: NodeViewProps) {
   );
 }
 
+const ComposerChoiceExtension = Node.create({
+  name: "composer-choice",
+  group: "inline",
+  inline: true,
+  atom: true,
+  selectable: true,
+  addAttributes() {
+    return {
+      chip: { default: null },
+      source: { default: "" },
+    };
+  },
+  parseHTML() {
+    return [{ tag: "span[data-composer-choice]" }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ["span", { "data-composer-choice": "", ...HTMLAttributes }];
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(ComposerChoiceNodeView);
+  },
+});
+
+function ComposerChoiceNodeView({ node }: NodeViewProps) {
+  return (
+    <NodeViewWrapper as="span" className={CHIP_NODE_SELECTION_CLASS_NAME}>
+      <ChoiceChip chip={node.attrs.chip as ChoiceChipValue} />
+    </NodeViewWrapper>
+  );
+}
+
 // ── Marker reveal (show ** when the cursor is on styled text) ──────────────
 
 type StyledRange = {
@@ -829,6 +862,7 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
         ComposerSkillExtension,
         ComposerCitationExtension,
         ComposerContextReferenceExtension,
+        ComposerChoiceExtension,
         ComposerMarkersExtension,
         ...(richText
           ? [
