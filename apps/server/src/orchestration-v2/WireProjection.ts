@@ -149,7 +149,11 @@ function boundDynamicValue(value: unknown): unknown {
 export function projectTurnItemForDetail(item: OrchestrationV2TurnItem): OrchestrationV2TurnItem {
   switch (item.type) {
     case "command_execution":
-      return { ...item, output: truncateDetail(item.output, MAX_ON_DEMAND_BYTES) };
+      return {
+        ...item,
+        input: truncateDetail(item.input, MAX_ON_DEMAND_BYTES) ?? "",
+        output: truncateDetail(item.output, MAX_ON_DEMAND_BYTES),
+      };
     case "dynamic_tool":
       return {
         ...item,
