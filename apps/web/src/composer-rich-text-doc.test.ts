@@ -15,6 +15,7 @@ import {
   pmToFlat,
   serializeEditorDoc,
 } from "./composer-rich-text-doc";
+import { serializeChoiceChip } from "./lib/choiceQuestions";
 
 function stubAtom(name: string, attrs: Record<string, { default: unknown }>) {
   return Node.create({
@@ -59,6 +60,7 @@ const schema = getSchemaByResolvedExtensions(
       label: { default: "" },
       source: { default: "" },
     }),
+    stubAtom("composer-choice", { chip: { default: null }, source: { default: "" } }),
     TaskList,
     ComposerTaskItemExtension,
   ]),
@@ -109,6 +111,7 @@ const plainSchema = getSchemaByResolvedExtensions(
       label: { default: "" },
       source: { default: "" },
     }),
+    stubAtom("composer-choice", { chip: { default: null }, source: { default: "" } }),
     TaskList,
     ComposerTaskItemExtension,
   ]),
@@ -320,6 +323,15 @@ describe("composer rich text document model", () => {
     expect(
       map.runs.some((run) => run.kind === "token" && run.nodeName === "composer-mention"),
     ).toBe(true);
+  });
+
+  it("keeps reply chips as single atoms between styled text", () => {
+    const chip = serializeChoiceChip({ messageId: "message-1", question: 2, option: "B" });
+    const value = `**yes** ${chip} and more`;
+    const map = roundTrip(value);
+    expect(map.value).toBe(value);
+    expect(map.runs.filter((run) => run.nodeName === "composer-choice")).toHaveLength(1);
+    expect(roundTripPlain(value).value).toBe(value);
   });
 
   it("normalizes uppercase checkboxes to lowercase", () => {
