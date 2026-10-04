@@ -145,11 +145,13 @@ function ChoiceQuestionRow({
             key={option.id}
             type="button"
             size="sm-multiline"
-            variant={selected ? "default" : option.recommended ? "warning-outline" : "outline"}
+            variant={selected ? "default" : "outline"}
             aria-pressed={selected}
             onClick={() => toggle(option.id)}
           >
-            {option.recommended ? <StarIcon aria-label="Recommended" /> : null}
+            {option.recommended ? (
+              <StarIcon aria-label="Recommended" className="fill-warning text-warning" />
+            ) : null}
             {question.kind === "options" ? `${option.id} · ${option.label}` : option.label}
           </Button>
         );
